@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Dış ekran yoksa yazı burada (iç ekranda) gösterilir. -->
+    <FrameLayout
+        android:id="@+id/innerPrompterHolder"
+        android:layout_width="match_parent"
+        android:layout_height="260dp"
+        android:layout_gravity="top"
+        android:layout_marginTop="56dp"
+        android:alpha="0.85"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="#99000000"
+        android:orientation="vertical"
+        android:padding="10dp">
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:text="Dış ekran kontrol ediliyor…" />
+
+        <TextView
+            android:id="@+id/detailText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#AAAAAA"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/timerText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="64dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/btn_bg"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:textColor="#FF5252"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#99000000"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <Button android:id="@+id/btnSlower" style="@style/CtrlBtn" android:text="Yavaş" />
+            <TextView
+                android:id="@+id/speedText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="6dp"
+                android:minWidth="90dp"
+                android:gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+            <Button android:id="@+id/btnFaster" style="@style/CtrlBtn" android:text="Hızlı" />
+            <Button android:id="@+id/btnSmaller" style="@style/CtrlBtn" android:text="A−" />
+            <Button android:id="@+id/btnBigger" style="@style/CtrlBtn" android:text="A+" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <Button android:id="@+id/btnText" style="@style/CtrlBtn" android:text="Metin" />
+            <Button android:id="@+id/btnRewind" style="@style/CtrlBtn" android:text="Başa sar" />
+            <Button
+                android:id="@+id/btnRecord"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:layout_marginHorizontal="10dp"
+                android:background="@drawable/btn_bg"
+                android:backgroundTint="#E53935"
+                android:paddingHorizontal="28dp"
+                android:text="Başla"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp" />
+            <Button android:id="@+id/btnPause" style="@style/CtrlBtn" android:text="Yazıyı durdur" />
+            <Button android:id="@+id/btnRear" style="@style/CtrlBtn" android:text="Dış ekranı aç" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Metin düzenleme paneli -->
+    <LinearLayout
+        android:id="@+id/editorPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#F2111111"
+        android:orientation="vertical"
+        android:padding="20dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Okuyacağın metni buraya yapıştır"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp" />
+
+        <EditText
+            android:id="@+id/scriptEdit"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="12dp"
+            android:layout_weight="1"
+            android:background="#222222"
+            android:gravity="top|start"
+            android:inputType="textMultiLine|textCapSentences"
+            android:padding="14dp"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="end"
+            android:orientation="horizontal">
+
+            <Button android:id="@+id/btnPaste" style="@style/CtrlBtn" android:text="Panodan yapıştır" />
+            <Button android:id="@+id/btnClear" style="@style/CtrlBtn" android:text="Temizle" />
+            <Button android:id="@+id/btnDone" style="@style/CtrlBtn" android:text="Tamam" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

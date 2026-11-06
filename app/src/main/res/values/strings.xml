@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">LOVJA Prompter</string>
+    <string name="default_script">Merhaba, ben Atakan. Bu bir deneme kaydıdır. Telefonu tamamen açık tutuyorum, arka kamera beni çekiyor ve bu yazı dış ekranda akıyor. Okuduğum satır vurgulu görünüyor. Bir sonraki sürümde yazı, benim konuşma hızıma göre kendiliğinden akacak. Durursam duracak, hızlanırsam hızlanacak.</string>
+</resources>
