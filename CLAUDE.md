@@ -20,6 +20,17 @@ gündelik Türkçe ile anlat; kod dili, terim ve teknik ayrıntı kullanma. Onda
 - Metin yapıştırılır, "Başla" denir, video telefona (Galeri) kaydedilir.
 - Dil: Türkçe (ileride İngilizce).
 
+## Arayüz (Atakan'ın isteği, 2026-11-06)
+- **Her şey küçük (dış) ekranda**: düğmeler, kamera önizlemesi, yazı. Atakan
+  kayıtta sadece küçük ekranı görüyor.
+- Küçük ekran açıkken **büyük ekran kararır ve dokunmaya kapanır** (tamamen
+  kapatmak uygulamaya izinli değil; en düşük parlaklık + siyah + dokunma yok).
+  Sadece "Düzenle"ye basınca büyük ekranda metin düzenleme açılır.
+- "Başla" → 3-2-1 geri sayım → kayıt; kayıtta ekranda **sadece yazı + küçük
+  "Bitir" tuşu** (ve küçük süre).
+- **Dikey ve yatay çekim**: videonun yönü telefonun tutuluşuna göre otomatik.
+  Küçük ekrandaki yazı kendiliğinden dönmezse "↻" ile 90° döndürülür (ayar saklanır).
+
 ## Teknik kararlar
 - Web sitesi olamaz; gerçek Android uygulaması (Kotlin). Web sayfası dış ekrana içerik gönderemez.
 - Dış ekrana içerik: Jetpack WindowManager `WindowAreaController` +
@@ -44,13 +55,16 @@ gündelik Türkçe ile anlat; kod dili, terim ve teknik ayrıntı kullanma. Onda
 - Bulut ortamı Google'ın Android sunucularına (dl.google.com, maven.google.com)
   erişemiyor, yani APK burada derlenemiyor. APK **GitHub Actions** ile her
   `main` güncellemesinde derleniyor (`.github/workflows/build.yml`), "Releases"
-  bölümüne de konuyor. APK'yı `gh run download` ile alıp kullanıcıya dosya olarak ver.
+  bölümüne de konuyor. APK'yı REST ile al (`gh api .../releases`, asset'i `Accept: application/octet-stream` ile indir; `gh release download` GraphQL kullandığı için engelli), `/mnt/project-files/apk/` altına koy ve kullanıcıya dosya olarak ver.
 - APK, depodaki sabit `app/lovja-debug.keystore` ile imzalanır; böylece yeni sürüm
   eskisinin üstüne kaldırmadan kurulur. Anahtarı değiştirme.
 
 ## Sürümler
 - v0.1: arka kamera kaydı + dış ekranda sabit hızla akan metin (riskli kısmı doğrulama).
-- v0.2 (sıradaki): konuşmaya göre kaydırma (Türkçe, internetsiz).
+- v0.1 sonucu (Fold 8): kayıt "kod 8" (ERROR_NO_VALID_DATA, kameradan görüntü gelmedi)
+  verdi; 4K yerine Full HD'ye geçildi, hata mesajı ayrıntılandı.
+- v0.2: tüm kontroller küçük ekranda, büyük ekran karartılmış, dikey/yatay.
+- v0.3 (sıradaki): konuşmaya göre kaydırma (Türkçe, internetsiz).
 
 ## Kaynaklar
 - https://developer.android.com/develop/adaptive-apps/guides/foldables/support-foldable-display-modes
