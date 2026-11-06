@@ -26,7 +26,7 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease
           mkdir -p out
-          cp app/build/outputs/apk/release/app-release.apk "out/LOVJA-Prompter-v0.2.${GITHUB_RUN_NUMBER}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "out/LOVJA-Prompter-v0.3.${GITHUB_RUN_NUMBER}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -36,7 +36,7 @@ jobs:
       - name: Sürüm olarak yayınla
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.${{ github.run_number }}
-          name: LOVJA Prompter v0.2.${{ github.run_number }}
+          tag_name: v0.3.${{ github.run_number }}
+          name: LOVJA Prompter v0.3.${{ github.run_number }}
           body: "Telefona kurmak için aşağıdaki .apk dosyasını indir."
           files: out/*.apk

@@ -22,8 +22,8 @@ class PrompterView(context: Context, private val engine: PrompterEngine) : View(
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#33C8A96A") }
     private val markerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#C8A96A") }
-    private val dimColor = Color.parseColor("#7A7A7A")
-    private val readColor = Color.parseColor("#4A4A4A")
+    private val dimColor: Int get() = if (overlay) Color.parseColor("#C8C8C8") else Color.parseColor("#7A7A7A")
+    private val readColor: Int get() = if (overlay) Color.parseColor("#8A8A8A") else Color.parseColor("#4A4A4A")
     private val activeColor = Color.WHITE
 
     private var layout: StaticLayout? = null
@@ -38,6 +38,14 @@ class PrompterView(context: Context, private val engine: PrompterEngine) : View(
         setBackgroundColor(Color.BLACK)
         keepScreenOn = true
     }
+
+    /** true: görüntünün üstünde yarı saydam arka planla gösterilir. */
+    var overlay: Boolean = false
+        set(v) {
+            field = v
+            setBackgroundColor(if (v) Color.parseColor("#8C000000") else Color.BLACK)
+            invalidate()
+        }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()

@@ -4,12 +4,12 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ClipboardManager
 import android.content.ContentValues
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Rational
 import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.View
@@ -19,8 +19,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.ViewPort
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -30,10 +33,13 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import com.lovja.prompter.databinding.ActivityMainBinding
+import java.io.File
 
 class MainActivity : AppCompatActivity(), ControlPanel.Actions {
 
     private lateinit var b: ActivityMainBinding
+    private lateinit var settings: Settings
+    private lateinit var audio: AudioEngine
     private val engine = PrompterEngine()
     private lateinit var rear: RearDisplayHelper
 
@@ -43,24 +49,33 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
     private var outerPanel: ControlPanel? = null
 
     private var rearState = RearDisplayHelper.State.CHECKING
-    private var rearDetail = ""
     private var editing = false
     private var extraMessage: String? = null
 
+    private var cameraProvider: ProcessCameraProvider? = null
     private var preview: Preview? = null
     private var previewTarget: ControlPanel? = null
     private var videoCapture: VideoCapture<Recorder>? = null
+    private var boundRotation = -1
     private var recording: Recording? = null
     private var recordStart = 0L
     private var countingDown = false
+    private var busy = false
     private var deviceRotation = Surface.ROTATION_0
 
-    private val prefs by lazy { getSharedPreferences("prompter", Context.MODE_PRIVATE) }
+    // Harici mikrofonla kayıt
+    private var extAudio = false
+    private var audioBaseNanos = 0L
+    private var videoStartNanos = Long.MAX_VALUE
+    private var tmpVideo: File? = null
+    private var tmpAudio: File? = null
+    private var recordName = ""
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             if (result[Manifest.permission.CAMERA] == true) startCamera()
             else toast("Kamera izni olmadan kayıt yapılamaz.")
+            if (result[Manifest.permission.RECORD_AUDIO] == true) restartAudio()
         }
 
     private val timerTick = object : Runnable {
@@ -72,6 +87,8 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
             b.root.postDelayed(this, 500)
         }
     }
+
+    private val rebindRunnable = Runnable { bindCamera() }
 
     private val orientationListener by lazy {
         object : OrientationEventListener(this) {
@@ -85,10 +102,9 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
                 }
                 if (r != deviceRotation) {
                     deviceRotation = r
-                    // Kayıt sürerken videonun yönü sabit kalır.
-                    if (recording == null && !countingDown) {
-                        videoCapture?.targetRotation = r
-                    }
+                    // Telefon döndü: kırpma ve video yönü yeniden ayarlansın (kayıt sırasında değil).
+                    b.root.removeCallbacks(rebindRunnable)
+                    b.root.postDelayed(rebindRunnable, 700)
                 }
             }
         }
@@ -100,27 +116,35 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
         setContentView(b.root)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        engine.setText(prefs.getString("script", null) ?: getString(R.string.default_script))
-        engine.wordsPerSecond = prefs.getFloat("wps", 2.2f)
-        engine.textSizeSp = prefs.getFloat("size", 34f)
+        settings = Settings(this)
+        engine.setText(settings.script ?: getString(R.string.default_script))
+        engine.wordsPerSecond = settings.wps
+        engine.textSizeSp = settings.textSize
 
-        innerPanel = ControlPanel(this, engine, this)
+        audio = AudioEngine(this)
+        audio.onLevel = { lvl -> panels().forEach { it.setLevel(lvl) } }
+        audio.onTestState = { s -> panels().forEach { it.setTestState(s) } }
+        audio.onDevicesChanged = {
+            if (recording == null && !countingDown) restartAudio() else updateMicLists()
+        }
+
+        innerPanel = ControlPanel(this, engine, settings, this)
         b.panelHost.addView(innerPanel.root)
 
         rear = RearDisplayHelper(
             activity = this,
             createContent = { ctx ->
-                ControlPanel(ctx, engine, this).also {
+                ControlPanel(ctx, engine, settings, this).also {
                     outerPanel = it
-                    it.setAngle(prefs.getInt("outerAngle", 0))
-                    syncPanels()
+                    it.setAngle(settings.outerAngle)
+                    if (recording != null) it.showRecording()
                 }.root
             },
-            onStateChanged = { state, detail ->
+            onStateChanged = { state, _ ->
                 rearState = state
-                rearDetail = detail
                 if (state != RearDisplayHelper.State.ACTIVE) outerPanel = null
                 refresh()
+                updateMicLists()
             },
         )
         rear.startObserving()
@@ -132,58 +156,78 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
         permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onStart() {
+        super.onStart()
         if (orientationListener.canDetectOrientation()) orientationListener.enable()
+        restartAudio()
     }
 
-    override fun onPause() {
+    override fun onStop() {
         orientationListener.disable()
-        super.onPause()
+        if (recording == null && !countingDown) audio.stop()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        audio.release()
+        super.onDestroy()
     }
 
     private fun panels(): List<ControlPanel> = listOfNotNull(innerPanel, outerPanel)
 
     private fun outerActive() = rearState == RearDisplayHelper.State.ACTIVE && outerPanel != null
 
-    /** Büyük ekranın karartılması, durum yazısı ve kameranın hangi ekranda göründüğü. */
+    /** Büyük ekranın karartılması, durum yazısı ve kamera görüntüsünün hangi ekranda olduğu. */
     private fun refresh() {
+        // Büyük ekran sadece siyaha boyanır; parlaklığa dokunulmaz (küçük ekranı da karartıyordu).
         val blackout = outerActive() && !editing
         b.blackout.visibility = if (blackout) View.VISIBLE else View.GONE
         b.editorPanel.visibility = if (editing) View.VISIBLE else View.GONE
-        window.attributes = window.attributes.apply {
-            screenBrightness = if (blackout) 0.01f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-        }
 
         val status = extraMessage ?: when (rearState) {
             RearDisplayHelper.State.CHECKING -> "Küçük ekran kontrol ediliyor…"
-            RearDisplayHelper.State.ACTIVE -> "Hazır. Kendini kadraja al, “Başla”ya bas."
-            RearDisplayHelper.State.AVAILABLE -> "Küçük ekran hazır, açılıyor…"
+            RearDisplayHelper.State.ACTIVE -> "Küçük ekran hazır."
+            RearDisplayHelper.State.AVAILABLE -> "Küçük ekran açılıyor…"
             RearDisplayHelper.State.UNAVAILABLE -> "Küçük ekran şu an kullanılamıyor. Telefonu tamamen aç."
             RearDisplayHelper.State.UNSUPPORTED -> "Bu telefon küçük ekrana görüntü göndermeyi desteklemiyor görünüyor."
         }
-        panels().forEach { it.setStatus(status) }
+        panels().forEach { it.setStatus(status); it.refresh() }
         attachPreview()
     }
 
-    private fun syncPanels() {
-        refresh()
-        val p = outerPanel ?: return
-        when {
-            recording != null -> p.showRecording()
-            else -> p.showSetup()
-        }
+    // ---------- Mikrofon ----------
+
+    private fun restartAudio() {
+        if (!hasPermission(Manifest.permission.RECORD_AUDIO)) return
+        if (recording != null || countingDown) return
+        audio.start(audio.resolve(settings.micId))
+        updateMicLists()
+    }
+
+    private fun updateMicLists() {
+        val mics = audio.mics()
+        val active = audio.activeMic?.let { a -> mics.firstOrNull { it.id == a.id }?.label ?: a.label }
+        panels().forEach { it.setMics(mics, settings.micId, active) }
+    }
+
+    override fun onMicSelected(id: Int) {
+        if (recording != null) return
+        settings.micId = id
+        restartAudio()
+    }
+
+    override fun onMicTest() {
+        audio.startTest(5)
     }
 
     // ---------- Panel düğmeleri ----------
 
     override fun onRecord() {
-        if (recording != null || countingDown) return
-        if (videoCapture == null) { toast("Kamera hazır değil."); return }
+        if (recording != null || countingDown || busy) return
+        if (videoCapture == null) { flash("Kamera hazır değil."); return }
         engine.pause()
         engine.rewind()
         countingDown = true
-        videoCapture?.targetRotation = deviceRotation
         countdown(3)
     }
 
@@ -201,7 +245,7 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
     override fun onStopRecording() {
         if (countingDown) {
             countingDown = false
-            panels().forEach { it.showSetup() }
+            panels().forEach { it.showIdle() }
             return
         }
         engine.pause()
@@ -225,18 +269,25 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
         editing = true
         b.scriptEdit.setText(engine.text)
         flash("Metni büyük ekranda düzenle, bitince “Tamam”a bas.", 6000)
-        refresh()
     }
 
     override fun onRotate() {
-        val p = outerPanel ?: return
-        val a = (prefs.getInt("outerAngle", 0) + 90) % 360
-        prefs.edit().putInt("outerAngle", a).apply()
-        p.setAngle(a)
+        val a = (settings.outerAngle + 90) % 360
+        settings.outerAngle = a
+        outerPanel?.setAngle(a)
     }
 
     override fun onSettingsChanged() {
-        prefs.edit().putFloat("wps", engine.wordsPerSecond).putFloat("size", engine.textSizeSp).apply()
+        settings.wps = engine.wordsPerSecond
+        settings.textSize = engine.textSizeSp
+    }
+
+    override fun onFormatChanged() {
+        bindCamera()
+    }
+
+    override fun onPanelModeChanged() {
+        // Görünüm değişti (ayarlar ↔ kayıt ekranı); şimdilik ek iş yok.
     }
 
     private fun setupEditor() {
@@ -258,7 +309,8 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
     private fun setScript(t: String) {
         engine.pause()
         engine.setText(t)
-        prefs.edit().putString("script", t).apply()
+        settings.script = t
+        panels().forEach { it.refresh() }
     }
 
     /** Durum satırında birkaç saniye bir mesaj gösterir. */
@@ -279,74 +331,148 @@ class MainActivity : AppCompatActivity(), ControlPanel.Actions {
         // Aynı ekrana tekrar bağlamak kamerayı bir anlığına durdurur; sadece değişince bağla.
         if (previewTarget === target) return
         previewTarget = target
+        // Görüntünün yönü, gösterildiği ekranın yönüne göre.
+        p.targetRotation = target.previewView.display?.rotation
+            ?: if (target === innerPanel) (display?.rotation ?: Surface.ROTATION_0) else Surface.ROTATION_0
         p.setSurfaceProvider(target.previewView.surfaceProvider)
     }
 
     private fun startCamera() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
-            val provider = future.get()
-            val p = Preview.Builder().build()
-            // Full HD: 4K bazı cihazlarda önizleme ile birlikte veri üretmeyebiliyor (hata 8).
-            val recorder = Recorder.Builder()
-                .setQualitySelector(
-                    QualitySelector.from(Quality.FHD, FallbackStrategy.lowerQualityOrHigherThan(Quality.FHD))
-                )
-                .build()
-            val capture = VideoCapture.withOutput(recorder)
-            capture.targetRotation = deviceRotation
-            try {
-                provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, p, capture)
-                preview = p
-                previewTarget = null
-                videoCapture = capture
-                attachPreview()
-            } catch (e: Exception) {
-                Log.e(TAG, "bind failed", e)
-                toast("Kamera açılamadı: ${e.message}")
-            }
+            cameraProvider = future.get()
+            bindCamera()
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    /** Kamerayı seçili biçim (dikey/yatay), kalite ve telefonun duruşuna göre bağlar. */
+    private fun bindCamera() {
+        val provider = cameraProvider ?: return
+        if (recording != null || countingDown || busy) return
+        val quality = if (settings.uhd) Quality.UHD else Quality.FHD
+        val p = Preview.Builder().build()
+        val recorder = Recorder.Builder()
+            .setQualitySelector(QualitySelector.from(quality, FallbackStrategy.lowerQualityOrHigherThan(quality)))
+            .build()
+        val capture = VideoCapture.withOutput(recorder)
+        capture.targetRotation = deviceRotation
+        // Görüntü, seçilen biçime (9:16 ya da 16:9) telefonun tutuluşuna göre kırpılır.
+        val ratio = if (settings.vertical) Rational(9, 16) else Rational(16, 9)
+        val viewPort = ViewPort.Builder(ratio, deviceRotation).setScaleType(ViewPort.FILL_CENTER).build()
+        val group = UseCaseGroup.Builder().addUseCase(p).addUseCase(capture).setViewPort(viewPort).build()
+        try {
+            provider.unbindAll()
+            provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, group)
+            preview = p
+            previewTarget = null
+            videoCapture = capture
+            boundRotation = deviceRotation
+            attachPreview()
+        } catch (e: Exception) {
+            Log.e(TAG, "bind failed", e)
+            flash("Kamera açılamadı: ${e.message}", 8000)
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun startRecording() {
-        val capture = videoCapture ?: run { toast("Kamera hazır değil."); panels().forEach { it.showSetup() }; return }
-        val name = "LOVJA_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+        val capture = videoCapture ?: run { flash("Kamera hazır değil."); panels().forEach { it.showIdle() }; return }
+        if (boundRotation != deviceRotation) bindCamera()
+        val cap = videoCapture ?: capture
+        recordName = "LOVJA_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
             .format(System.currentTimeMillis())
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, name)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/LOVJA Prompter")
+
+        val mic = audio.activeMic
+        extAudio = mic?.external == true && hasPermission(Manifest.permission.RECORD_AUDIO)
+        val pending = if (extAudio) {
+            // Yaka mikrofonu: video sessiz kaydedilir, ses ayrı alınır, sonra birleştirilir.
+            val v = File(cacheDir, "rec_video.mp4").also { it.delete() }
+            val a = File(cacheDir, "rec_audio.m4a").also { it.delete() }
+            tmpVideo = v; tmpAudio = a
+            audioBaseNanos = System.nanoTime() - 1_000_000_000L
+            videoStartNanos = Long.MAX_VALUE
+            if (!audio.beginRecording(a, audioBaseNanos)) {
+                extAudio = false
+                flash("Yaka mikrofonu başlatılamadı, telefonun mikrofonu kullanılıyor.", 6000)
+            }
+            if (extAudio) cap.output.prepareRecording(this, FileOutputOptions.Builder(v).build()) else null
+        } else null
+
+        val finalPending = pending ?: run {
+            // Telefonun kendi mikrofonu: kamera sesi kendisi kaydeder.
+            audio.stop()
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, recordName)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/LOVJA Prompter")
+            }
+            val options = MediaStoreOutputOptions.Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                .setContentValues(values).build()
+            var pr = cap.output.prepareRecording(this, options)
+            if (hasPermission(Manifest.permission.RECORD_AUDIO)) pr = pr.withAudioEnabled()
+            pr
         }
-        val options = MediaStoreOutputOptions.Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-            .setContentValues(values)
-            .build()
-        var pending = capture.output.prepareRecording(this, options)
-        if (hasPermission(Manifest.permission.RECORD_AUDIO)) pending = pending.withAudioEnabled()
 
         panels().forEach { it.showRecording() }
-        recording = pending.start(ContextCompat.getMainExecutor(this)) { event ->
+        recording = finalPending.start(ContextCompat.getMainExecutor(this)) { event ->
             when (event) {
                 is VideoRecordEvent.Start -> {
                     recordStart = SystemClock.elapsedRealtime()
                     b.root.post(timerTick)
                     engine.play()
                 }
-                is VideoRecordEvent.Finalize -> {
-                    recording = null
-                    engine.pause()
-                    engine.rewind()
-                    panels().forEach { it.showSetup() }
-                    if (event.hasError() && event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
-                        Log.e(TAG, "record error ${event.error}", event.cause)
-                        flash("Kayıt sorunu: ${errorText(event.error)} (kod ${event.error}). ${event.cause?.message ?: ""}", 12000)
-                    } else {
-                        flash("Video kaydedildi: Galeri › LOVJA Prompter", 6000)
-                    }
+                is VideoRecordEvent.Status -> {
+                    // Videonun ilk karesinin zamanını tahmin et (sesi buna hizalayacağız).
+                    val d = event.recordingStats.recordedDurationNanos
+                    if (extAudio && d > 0) videoStartNanos = minOf(videoStartNanos, System.nanoTime() - d)
                 }
+                is VideoRecordEvent.Finalize -> onFinalize(event)
             }
         }
+    }
+
+    private fun onFinalize(event: VideoRecordEvent.Finalize) {
+        recording = null
+        engine.pause()
+        engine.rewind()
+        panels().forEach { it.showIdle() }
+        val failed = event.hasError() && event.error != VideoRecordEvent.Finalize.ERROR_NONE
+        if (failed) {
+            Log.e(TAG, "record error ${event.error}", event.cause)
+            flash("Kayıt sorunu: ${errorText(event.error)} (kod ${event.error}). ${event.cause?.message ?: ""}", 12000)
+        }
+        if (!extAudio) {
+            if (!failed) flash("Video kaydedildi: Galeri › LOVJA Prompter", 6000)
+            restartAudio()
+            if (boundRotation != deviceRotation) bindCamera()
+            return
+        }
+        // Yaka mikrofonu: sesi ve görüntüyü birleştir.
+        busy = true
+        flash("Video hazırlanıyor, bekle…", 60_000)
+        val v = tmpVideo!!; val a = tmpAudio!!
+        val shiftUs = (if (videoStartNanos == Long.MAX_VALUE) 1_000_000_000L else videoStartNanos - audioBaseNanos) / 1000 -
+            settings.audioOffsetMs * 1000L
+        Thread {
+            val audioOk = audio.endRecording()
+            val result = try {
+                if (failed && !v.exists()) "Kayıt alınamadı."
+                else {
+                    Muxer.merge(contentResolver, v, if (audioOk) a else null, shiftUs, recordName)
+                    if (audioOk) "Video kaydedildi (yaka mikrofonu sesiyle): Galeri › LOVJA Prompter"
+                    else "Video kaydedildi ama yaka mikrofonundan ses alınamadı."
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "merge", t)
+                "Video birleştirilemedi: ${t.message}"
+            }
+            v.delete(); a.delete()
+            runOnUiThread {
+                busy = false
+                flash(result, 8000)
+                bindCamera()
+            }
+        }.start()
     }
 
     private fun errorText(code: Int) = when (code) {

@@ -20,16 +20,34 @@ gündelik Türkçe ile anlat; kod dili, terim ve teknik ayrıntı kullanma. Onda
 - Metin yapıştırılır, "Başla" denir, video telefona (Galeri) kaydedilir.
 - Dil: Türkçe (ileride İngilizce).
 
-## Arayüz (Atakan'ın isteği, 2026-11-06)
+## Arayüz (Atakan'ın istekleri, 2026-11-06)
 - **Her şey küçük (dış) ekranda**: düğmeler, kamera önizlemesi, yazı. Atakan
   kayıtta sadece küçük ekranı görüyor.
-- Küçük ekran açıkken **büyük ekran kararır ve dokunmaya kapanır** (tamamen
-  kapatmak uygulamaya izinli değil; en düşük parlaklık + siyah + dokunma yok).
+- Küçük ekran açıkken **büyük ekran siyah ve dokunmaya kapalı**. Parlaklığı
+  KISMA: pencere parlaklığı küçük ekranı da karartıyor (v0.2'de oldu).
   Sadece "Düzenle"ye basınca büyük ekranda metin düzenleme açılır.
-- "Başla" → 3-2-1 geri sayım → kayıt; kayıtta ekranda **sadece yazı + küçük
-  "Bitir" tuşu** (ve küçük süre).
-- **Dikey ve yatay çekim**: videonun yönü telefonun tutuluşuna göre otomatik.
-  Küçük ekrandaki yazı kendiliğinden dönmezse "↻" ile 90° döndürülür (ayar saklanır).
+- Akış: önce **Ayarlar ekranı** (video biçimi, kalite, mikrofon + seviye + ses
+  testi, ses-görüntü ince ayarı, yazı, ayna) → "Kayda geç" → **sade kayıt ekranı**.
+- Kayıt ekranında Atakan **kendini görür** (ayna görüntü varsayılan açık):
+  - Dikey 9:16 (Reels) biçim + telefon yan → görüntü bir yanda, yazı yanındaki
+    boşlukta (⇄ ile taraf değişir). 4K önerilir (kırpma yüzünden).
+  - Yatay 16:9 biçim (ya da telefon dik) → görüntü ekranı kaplar, yazı üstünden
+    yarı saydam akar.
+- "Başla" → 3-2-1 → kayıt; kayıtta sadece görüntü + yazı + küçük "Bitir" ve süre.
+- Video yönü/kırpması telefonun tutuluşuna göre (CameraX ViewPort + targetRotation).
+  Küçük ekran kendiliğinden dönmezse "↻" ile 90° döndürülür (ayar saklanır).
+
+## Ses / yaka mikrofonu
+- CameraX kendi ses kaydında hep CAMCORDER kaynağını, yani telefonun iç
+  mikrofonunu kullanıyor; takılı DJI yaka mikrofonunu seçemiyor (v0.2'de ses
+  telefondan geldi).
+- Çözüm (`AudioEngine` + `Muxer`): harici mikrofon seçiliyse video sessiz
+  kaydedilir, ses AudioRecord (preferredDevice) ile ayrı AAC dosyasına yazılır,
+  kayıt bitince ikisi birleştirilip Galeri'ye konur. İç mikrofonda CameraX'in
+  kendi sesi kullanılır.
+- Senkron: videonun başlangıcı Status olaylarından tahmin edilir
+  (`now - recordedDurationNanos` en küçüğü); ayarlarda ±20 ms adımlı ince ayar var.
+- Aynı AudioEngine ileride konuşma tanımaya da ses verecek.
 
 ## Teknik kararlar
 - Web sitesi olamaz; gerçek Android uygulaması (Kotlin). Web sayfası dış ekrana içerik gönderemez.
@@ -64,7 +82,10 @@ gündelik Türkçe ile anlat; kod dili, terim ve teknik ayrıntı kullanma. Onda
 - v0.1 sonucu (Fold 8): kayıt "kod 8" (ERROR_NO_VALID_DATA, kameradan görüntü gelmedi)
   verdi; 4K yerine Full HD'ye geçildi, hata mesajı ayrıntılandı.
 - v0.2: tüm kontroller küçük ekranda, büyük ekran karartılmış, dikey/yatay.
-- v0.3 (sıradaki): konuşmaya göre kaydırma (Türkçe, internetsiz).
+- v0.2 sonucu: kayıt çalıştı. Sorunlar: parlaklık kısınca küçük ekran da karardı;
+  DJI yaka mikrofonundan ses gelmedi; kendini görecek alan yoktu.
+- v0.3: ayarlar ekranı, yaka mikrofonu + test, dikey/yatay biçim, kayıtta önizleme.
+- v0.4 (sıradaki): konuşmaya göre kaydırma (Türkçe, internetsiz).
 
 ## Kaynaklar
 - https://developer.android.com/develop/adaptive-apps/guides/foldables/support-foldable-display-modes
